@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 st.set_page_config(layout="wide", page_title="Ensayo de Calentamiento 600A")
-st.title("Estabilidad Térmica - Inyección 600A")
+st.title("Estabilidad Térmica")
 
 # ==========================================
 # METADATOS DEL ENSAYO
