@@ -30,11 +30,16 @@ r_fin = col_param2.number_input("R Contacto Fin (µΩ)", value=0.0)
 # INICIALIZACIÓN DE DATOS
 # ==========================================
 sensores = ['Ua', 'Ub', 'Uc', 'Va', 'Vb', 'Vc', 'Wa', 'Wb', 'Wc']
+
 if 'df_ensayo' not in st.session_state:
     cols = ['Nº Medición', 'Hora (HH:MM)', 'Corriente [A]', 'Temp Amb'] + sensores
     st.session_state.df_ensayo = pd.DataFrame(columns=cols)
     # Se agrega 600.0 como valor por defecto inicial para la corriente
     st.session_state.df_ensayo.loc[0] = [1, '14:00', 600.0, 25.0] + [25.0]*9
+else:
+    # Parche de seguridad: si existe una sesión vieja sin la columna nueva, se la agregamos
+    if 'Corriente [A]' not in st.session_state.df_ensayo.columns:
+        st.session_state.df_ensayo.insert(2, 'Corriente [A]', 600.0)
 
 # ==========================================
 # REGISTRO DE MEDICIONES (EVITANDO REFRESH)
