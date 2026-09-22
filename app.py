@@ -19,7 +19,7 @@ r_fin = col3.number_input("R Contacto Fin (µΩ)", value=0.0)
 # Inicializar dataframe en Session State si no existe
 if 'df_ensayo' not in st.session_state:
     # Columnas: Hora y las 9 posiciones
-    cols = ['Hora (HH:MM)', 'U-A', 'U-B', 'U-C', 'V-A', 'V-B', 'V-C', 'W-A', 'W-B', 'W-C']
+    cols = ['Hora (HH:MM)', 'Ua', 'Ub', 'Uc', 'Va', 'Vb', 'Vc', 'Wa', 'Wb', 'Wc']
     st.session_state.df_ensayo = pd.DataFrame(columns=cols)
     # Fila vacía para empezar
     st.session_state.df_ensayo.loc[0] = ['14:00'] + [t_amb]*9
