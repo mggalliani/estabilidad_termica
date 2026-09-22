@@ -228,7 +228,6 @@ st.divider()
 st.subheader("Finalizar y Exportar")
 @st.cache_data
 def convertir_df_a_csv(df):
-    # Genera un CSV para descargar, descartando la columna de tiempo calculada internamente si se desea
     return df.to_csv(index=False).encode('utf-8')
 
 csv = convertir_df_a_csv(df_modelo)
@@ -238,5 +237,3 @@ st.download_button(
     file_name='ensayo_estabilidad.csv',
     mime='text/csv'
 )
-else:
-    st.info("Cargá al menos 3 mediciones de tiempo para ajustar la proyección matemática.")
