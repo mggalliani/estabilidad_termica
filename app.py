@@ -3,10 +3,11 @@ import pandas as pd
 import numpy as np
 from scipy.optimize import curve_fit
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 
-st.set_page_config(layout="wide", page_title="Ensayo de Calentamiento 600A")
-st.title("Estabilidad Térmica - Inyección 600A")
+st.set_page_config(layout="wide", page_title="Ensayo de Calentamiento")
+st.title("Estabilidad Térmica")
 
 # ==========================================
 # METADATOS DEL ENSAYO
@@ -30,9 +31,10 @@ r_fin = col_param2.number_input("R Contacto Fin (µΩ)", value=0.0)
 # ==========================================
 sensores = ['Ua', 'Ub', 'Uc', 'Va', 'Vb', 'Vc', 'Wa', 'Wb', 'Wc']
 if 'df_ensayo' not in st.session_state:
-    cols = ['Nº Medición', 'Hora (HH:MM)', 'Temp Amb'] + sensores
+    cols = ['Nº Medición', 'Hora (HH:MM)', 'Corriente [A]', 'Temp Amb'] + sensores
     st.session_state.df_ensayo = pd.DataFrame(columns=cols)
-    st.session_state.df_ensayo.loc[0] = [1, '14:00', 25.0] + [25.0]*9
+    # Se agrega 600.0 como valor por defecto inicial para la corriente
+    st.session_state.df_ensayo.loc[0] = [1, '14:00', 600.0, 25.0] + [25.0]*9
 
 # ==========================================
 # REGISTRO DE MEDICIONES (EVITANDO REFRESH)
@@ -43,7 +45,6 @@ def obtener_hora_local():
     hora_arg = datetime.utcnow() - timedelta(hours=3)
     return hora_arg.strftime('%H:%M')
 
-# Botón para agregar fila automáticamente (fuera del formulario)
 if st.button("➕ Agregar medición con hora actual"):
     hora_actual = obtener_hora_local()
     df_temp = st.session_state.df_ensayo.copy()
@@ -52,20 +53,17 @@ if st.button("➕ Agregar medición con hora actual"):
         nueva_fila = df_temp.iloc[-1].copy()
         nueva_fila['Hora (HH:MM)'] = hora_actual
     else:
-        nueva_fila = pd.Series([1, hora_actual, 25.0] + [25.0]*9, index=df_temp.columns)
+        nueva_fila = pd.Series([1, hora_actual, 600.0, 25.0] + [25.0]*9, index=df_temp.columns)
     
-    # Agregar la fila y resetear índices por si se borraron filas a mano
     df_temp.loc[len(df_temp)] = nueva_fila
     df_temp.reset_index(drop=True, inplace=True)
     df_temp['Nº Medición'] = range(1, len(df_temp) + 1)
     
     st.session_state.df_ensayo = df_temp
 
-# USO DE FORMULARIO PARA EVITAR CORTES AL TIPEAR
 with st.form("formulario_mediciones"):
-    st.markdown("✏️ **Modo de edición:** Cambiá las temperaturas tranquilamente. La pantalla no se va a actualizar hasta que guardes los cambios.")
+    st.markdown("✏️ **Modo de edición:** Cambiá los valores tranquilamente. La pantalla no se va a actualizar hasta que guardes los cambios.")
     
-    # Renderizar la tabla editable
     df_editado_form = st.data_editor(
         st.session_state.df_ensayo, 
         num_rows="dynamic", 
@@ -74,17 +72,13 @@ with st.form("formulario_mediciones"):
         disabled=["Nº Medición"]
     )
     
-    # Botón exclusivo para confirmar la carga de datos
     guardar_cambios = st.form_submit_button("💾 Guardar Cambios y Actualizar Gráficos", type="primary")
 
-# Si se presiona el botón, impactamos los cambios en el session_state
 if guardar_cambios:
-    # Reacomodamos el índice por las dudas
     df_editado_form.reset_index(drop=True, inplace=True)
     df_editado_form['Nº Medición'] = range(1, len(df_editado_form) + 1)
     st.session_state.df_ensayo = df_editado_form
 
-# Para los cálculos, usamos siempre lo que está guardado
 df_modelo = st.session_state.df_ensayo.copy()
 
 # ==========================================
@@ -106,6 +100,7 @@ if len(df_modelo) > 0:
     df_modelo['t_min'] = df_modelo['Hora (HH:MM)'].apply(lambda x: calcular_minutos(x, hora_cero))
     df_modelo = df_modelo.dropna(subset=['t_min']).copy()
     
+    df_modelo['Corriente [A]'] = pd.to_numeric(df_modelo['Corriente [A]'], errors='coerce')
     for s in sensores:
         df_modelo[s] = pd.to_numeric(df_modelo[s], errors='coerce')
 
@@ -149,7 +144,8 @@ if len(df_modelo) > 1 and delta_sensor != "":
 # AJUSTE Y GRÁFICOS
 # ==========================================
 if len(df_modelo) > 2:
-    fig = go.Figure()
+    # Se crea un gráfico con un eje Y secundario
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
     t_proyeccion = np.linspace(0, max(df_modelo['t_min']) + 120, 100)
     
     t_data = df_modelo['t_min'].values
@@ -165,17 +161,46 @@ if len(df_modelo) > 2:
         def modelo_calentamiento(t, delta_T, tau):
             return T_inicial + delta_T * (1 - np.exp(-t / tau))
         
+        # 1. Graficar Corriente (Eje Y Secundario)
+        if not df_modelo['Corriente [A]'].isna().all():
+            fig.add_trace(go.Scatter(
+                x=df_modelo['t_min'], 
+                y=df_modelo['Corriente [A]'], 
+                mode='lines+markers', 
+                name='Corriente Inyectada [A]', 
+                line=dict(color='orange', dash='dashdot')
+            ), secondary_y=True)
+
+        # 2. Graficar Temp Ambiente (Eje Y Principal)
         df_modelo['Temp Amb'] = pd.to_numeric(df_modelo['Temp Amb'], errors='coerce')
         if not df_modelo['Temp Amb'].isna().all():
-            fig.add_trace(go.Scatter(x=df_modelo['t_min'], y=df_modelo['Temp Amb'], mode='lines+markers', name='Temp Ambiente', line=dict(color='gray', dash='dot')))
+            fig.add_trace(go.Scatter(
+                x=df_modelo['t_min'], 
+                y=df_modelo['Temp Amb'], 
+                mode='lines+markers', 
+                name='Temp Ambiente', 
+                line=dict(color='gray', dash='dot')
+            ), secondary_y=False)
 
+        # 3. Graficar Datos y Proyección de Temperatura (Eje Y Principal)
         try:
             popt, pcov = curve_fit(modelo_calentamiento, t_data, T_data, p0=[50, 60], bounds=(0, [200, 500]))
             delta_T_fit, tau_fit = popt
             
-            fig.add_trace(go.Scatter(x=t_data, y=T_data, mode='markers+lines', name=f'Medición {sensor_critico}', marker=dict(size=8)))
+            fig.add_trace(go.Scatter(
+                x=t_data, y=T_data, 
+                mode='markers+lines', 
+                name=f'Medición {sensor_critico}', 
+                marker=dict(size=8)
+            ), secondary_y=False)
+            
             T_proy = modelo_calentamiento(t_proyeccion, delta_T_fit, tau_fit)
-            fig.add_trace(go.Scatter(x=t_proyeccion, y=T_proy, mode='lines', name=f'Proyección Modelo', line=dict(dash='dash', color='blue')))
+            fig.add_trace(go.Scatter(
+                x=t_proyeccion, y=T_proy, 
+                mode='lines', 
+                name=f'Proyección Modelo', 
+                line=dict(dash='dash', color='blue')
+            ), secondary_y=False)
             
             cinco_tau = 5 * tau_fit
             fig.add_vline(x=cinco_tau, line_width=1, line_dash="dot", line_color="red", annotation_text=f"5 Tau ({cinco_tau:.0f} min)")
@@ -218,7 +243,12 @@ if len(df_modelo) > 2:
         except Exception as e:
             st.error(f"El modelo necesita más dispersión térmica. Esperá a cargar otra lectura del sensor {sensor_critico}.")
 
-        fig.update_layout(xaxis_title="Tiempo transcurrido (min)", yaxis_title="Temperatura (°C)")
+        # Configuración de los ejes
+        fig.update_layout(xaxis_title="Tiempo transcurrido (min)")
+        fig.update_yaxes(title_text="Temperatura (°C)", secondary_y=False)
+        # Se fuerza a que el eje de corriente arranque desde 0
+        fig.update_yaxes(title_text="Corriente [A]", secondary_y=True, rangemode="tozero")
+        
         st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
