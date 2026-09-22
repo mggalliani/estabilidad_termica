@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 st.set_page_config(layout="wide", page_title="Ensayo de Calentamiento 600A")
-st.title("Estabilidad Térmica")
+st.title("Estabilidad Térmica - Inyección 600A")
 
 # ==========================================
 # METADATOS DEL ENSAYO
@@ -35,42 +35,57 @@ if 'df_ensayo' not in st.session_state:
     st.session_state.df_ensayo.loc[0] = [1, '14:00', 25.0] + [25.0]*9
 
 # ==========================================
-# REGISTRO DE MEDICIONES Y BOTÓN DE HORA
+# REGISTRO DE MEDICIONES (EVITANDO REFRESH)
 # ==========================================
 st.subheader("Registro de Mediciones")
 
 def obtener_hora_local():
-    # Ajuste para UTC-3 (Hora Argentina) para que funcione bien en el servidor de Streamlit
     hora_arg = datetime.utcnow() - timedelta(hours=3)
     return hora_arg.strftime('%H:%M')
 
-# Botón para agregar fila automáticamente
+# Botón para agregar fila automáticamente (fuera del formulario)
 if st.button("➕ Agregar medición con hora actual"):
     hora_actual = obtener_hora_local()
-    if len(st.session_state.df_ensayo) > 0:
-        # Copia la última fila para no tener que tipear todo de nuevo
-        nueva_fila = st.session_state.df_ensayo.iloc[-1].copy()
+    df_temp = st.session_state.df_ensayo.copy()
+    
+    if len(df_temp) > 0:
+        nueva_fila = df_temp.iloc[-1].copy()
         nueva_fila['Hora (HH:MM)'] = hora_actual
     else:
-        # Si la tabla estuviera vacía, crea una fila base
-        nueva_fila = pd.Series([1, hora_actual, 25.0] + [25.0]*9, index=st.session_state.df_ensayo.columns)
+        nueva_fila = pd.Series([1, hora_actual, 25.0] + [25.0]*9, index=df_temp.columns)
     
-    st.session_state.df_ensayo.loc[len(st.session_state.df_ensayo)] = nueva_fila
+    # Agregar la fila y resetear índices por si se borraron filas a mano
+    df_temp.loc[len(df_temp)] = nueva_fila
+    df_temp.reset_index(drop=True, inplace=True)
+    df_temp['Nº Medición'] = range(1, len(df_temp) + 1)
+    
+    st.session_state.df_ensayo = df_temp
 
-# Autocompletar número de medición
-st.session_state.df_ensayo['Nº Medición'] = range(1, len(st.session_state.df_ensayo) + 1)
+# USO DE FORMULARIO PARA EVITAR CORTES AL TIPEAR
+with st.form("formulario_mediciones"):
+    st.markdown("✏️ **Modo de edición:** Cambiá las temperaturas tranquilamente. La pantalla no se va a actualizar hasta que guardes los cambios.")
+    
+    # Renderizar la tabla editable
+    df_editado_form = st.data_editor(
+        st.session_state.df_ensayo, 
+        num_rows="dynamic", 
+        use_container_width=True,
+        hide_index=True,
+        disabled=["Nº Medición"]
+    )
+    
+    # Botón exclusivo para confirmar la carga de datos
+    guardar_cambios = st.form_submit_button("💾 Guardar Cambios y Actualizar Gráficos", type="primary")
 
-# Renderizar la tabla editable
-df_editado = st.data_editor(
-    st.session_state.df_ensayo, 
-    num_rows="dynamic", 
-    use_container_width=True,
-    hide_index=True,
-    disabled=["Nº Medición"]
-)
+# Si se presiona el botón, impactamos los cambios en el session_state
+if guardar_cambios:
+    # Reacomodamos el índice por las dudas
+    df_editado_form.reset_index(drop=True, inplace=True)
+    df_editado_form['Nº Medición'] = range(1, len(df_editado_form) + 1)
+    st.session_state.df_ensayo = df_editado_form
 
-# Guardar los cambios manuales en el session_state
-st.session_state.df_ensayo = df_editado
+# Para los cálculos, usamos siempre lo que está guardado
+df_modelo = st.session_state.df_ensayo.copy()
 
 # ==========================================
 # PROCESAMIENTO MATEMÁTICO DE TIEMPOS
@@ -86,10 +101,10 @@ def calcular_minutos(hora_str, hora_base_str):
     except:
         return np.nan
 
-if len(df_editado) > 0:
-    hora_cero = df_editado['Hora (HH:MM)'].iloc[0]
-    df_editado['t_min'] = df_editado['Hora (HH:MM)'].apply(lambda x: calcular_minutos(x, hora_cero))
-    df_modelo = df_editado.dropna(subset=['t_min']).copy()
+if len(df_modelo) > 0:
+    hora_cero = df_modelo['Hora (HH:MM)'].iloc[0]
+    df_modelo['t_min'] = df_modelo['Hora (HH:MM)'].apply(lambda x: calcular_minutos(x, hora_cero))
+    df_modelo = df_modelo.dropna(subset=['t_min']).copy()
     
     for s in sensores:
         df_modelo[s] = pd.to_numeric(df_modelo[s], errors='coerce')
@@ -125,7 +140,7 @@ try:
     idx_defecto = sensores.index(sensor_por_defecto)
 except:
     idx_defecto = 0
-sensor_critico = st.selectbox("Sensor bajo análisis:", sensores, index=idx_defecto)
+sensor_critico = st.selectbox("Sensor bajo análisis (se actualiza automáticamente al de mayor temperatura):", sensores, index=idx_defecto)
 
 if len(df_modelo) > 1 and delta_sensor != "":
     st.info(f"**Mayor incremento en último intervalo:** {delta_max_medido:.1f} °C en el sensor {delta_sensor} (pasaron {tiempo_transcurrido:.0f} min desde la lectura anterior).")
@@ -203,7 +218,25 @@ if len(df_modelo) > 2:
         except Exception as e:
             st.error(f"El modelo necesita más dispersión térmica. Esperá a cargar otra lectura del sensor {sensor_critico}.")
 
-        fig.update_layout(xaxis_title="Tiempo (min)", yaxis_title="Temperatura (°C)")
+        fig.update_layout(xaxis_title="Tiempo transcurrido (min)", yaxis_title="Temperatura (°C)")
         st.plotly_chart(fig, use_container_width=True)
+
+# ==========================================
+# EXPORTACIÓN
+# ==========================================
+st.divider()
+st.subheader("Finalizar y Exportar")
+@st.cache_data
+def convertir_df_a_csv(df):
+    # Genera un CSV para descargar, descartando la columna de tiempo calculada internamente si se desea
+    return df.to_csv(index=False).encode('utf-8')
+
+csv = convertir_df_a_csv(df_modelo)
+st.download_button(
+    label="📥 Descargar mediciones (CSV)",
+    data=csv,
+    file_name='ensayo_estabilidad.csv',
+    mime='text/csv'
+)
 else:
     st.info("Cargá al menos 3 mediciones de tiempo para ajustar la proyección matemática.")
